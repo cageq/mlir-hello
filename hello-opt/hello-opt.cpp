@@ -26,6 +26,7 @@
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Bytecode/BytecodeOpInterface.h" 
 
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"

@@ -3,6 +3,7 @@
 
 include "HelloDialect.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Bytecode/BytecodeOpInterface.td"
 
 def ConstantOp : Hello_Op<"constant", [Pure]> {
   let summary = "constant";
