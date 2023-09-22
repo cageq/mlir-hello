@@ -231,7 +231,6 @@ feature_test_macros = [
             "name": "__cpp_lib_bitset",
             "values": {"c++26": 202306}, # P2697R1 Interfacing bitset with string_view
             "headers": ["bitset"],
-            "unimplemented": True,
         },
         {
             "name": "__cpp_lib_bool_constant",
@@ -802,7 +801,6 @@ feature_test_macros = [
             "name": "__cpp_lib_ranges_chunk_by",
             "values": {"c++23": 202202},
             "headers": ["ranges"],
-            "unimplemented": True,
         },
         {
             "name": "__cpp_lib_ranges_iota",

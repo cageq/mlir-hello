@@ -17,7 +17,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Transform/IR/TransformDialect.h"
-#include "mlir/IR/FunctionInterfaces.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 
 using namespace mlir;
 using namespace mlir::bufferization;
@@ -55,10 +55,9 @@ transform::OneShotBufferizeOp::apply(transform::TransformRewriter &rewriter,
                                      TransformResults &transformResults,
                                      TransformState &state) {
   OneShotBufferizationOptions options;
-  options.allowReturnAllocs = getAllowReturnAllocs();
+  options.allowReturnAllocsFromLoops = getAllowReturnAllocsFromLoops();
   options.allowUnknownOps = getAllowUnknownOps();
   options.bufferizeFunctionBoundaries = getBufferizeFunctionBoundaries();
-  options.createDeallocs = getCreateDeallocs();
   options.testAnalysisOnly = getTestAnalysisOnly();
   options.printConflicts = getPrintConflicts();
   if (getFunctionBoundaryTypeConversion().has_value())
@@ -114,15 +113,14 @@ DiagnosedSilenceableFailure transform::EliminateEmptyTensorsOp::apply(
     transform::TransformRewriter &rewriter, TransformResults &transformResults,
     TransformState &state) {
   OneShotBufferizationOptions options;
-  options.allowReturnAllocs = true;
+  options.allowReturnAllocsFromLoops = true;
 
   for (Operation *target : state.getPayloadOps(getTarget())) {
     OneShotAnalysisState state(target, options);
     if (failed(analyzeOp(target, state)))
       return mlir::emitSilenceableFailure(target->getLoc())
              << "failed to analyze op";
-    if (failed(bufferization::insertSliceAnchoredEmptyTensorEliminationStep(
-            rewriter, target, state)))
+    if (failed(bufferization::eliminateEmptyTensors(rewriter, target, state)))
       return mlir::emitSilenceableFailure(target->getLoc())
              << "failed to eliminate insert_slice anchored tensor.empty ops";
   }
@@ -176,5 +174,4 @@ public:
 void mlir::bufferization::registerTransformDialectExtension(
     DialectRegistry &registry) {
   registry.addExtensions<BufferizationTransformDialectExtension>();
-  bufferization::registerAllocationOpInterfaceExternalModels(registry);
 }
