@@ -1,11 +1,11 @@
 //
 // TODO: this test case is temporarily disabled as we are improving zero-cost sparse tensor reshaping.
-// UNSUPPORTED: target={{.*}}
+// XFAIL: *
 //
 // RUN: mlir-opt %s --linalg-generalize-named-ops --sparsification --cse --canonicalize | FileCheck %s
 
-#COO_2D = #sparse_tensor.encoding<{ lvlTypes = [ "compressed_nu", "singleton" ], posWidth = 32, crdWidth = 32 }>
-#COO_3D = #sparse_tensor.encoding<{ lvlTypes = [ "compressed_nu", "singleton_nu", "singleton" ], posWidth = 32, crdWidth = 32 }>
+#COO_2D = #sparse_tensor.encoding<{ map = (d0, d1) -> (d0 : compressed(nonunique), d1 : singleton), posWidth = 32, crdWidth = 32 }>
+#COO_3D = #sparse_tensor.encoding<{ map = (d0, d1, d2) -> (d0 : compressed(nonunique), d1 : singleton(nonunique), d2 : singleton), posWidth = 32, crdWidth = 32 }>
 
 
 // CHECK-LABEL:   func.func @sparse_reshape_fused(

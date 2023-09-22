@@ -372,6 +372,8 @@ gentbl_filegroup(
     td_file = "mlir/dialects/BufferizationOps.td",
     deps = [
         ":BufferizationOpsPyTdFiles",
+        "//mlir:DestinationStyleOpInterfaceTdFiles",
+        "//mlir:SubsetInsertionOpInterfaceTdFiles",
     ],
 )
 
@@ -539,6 +541,37 @@ filegroup(
         "mlir/dialects/_ml_program_ops_ext.py",
         "mlir/dialects/ml_program.py",
         ":MLProgramOpsPyGen",
+    ],
+)
+
+##---------------------------------------------------------------------------##
+# OpenMP dialect.
+##---------------------------------------------------------------------------##
+
+gentbl_filegroup(
+    name = "OpenMPOpsPyGen",
+    tbl_outs = [
+        (
+            [
+                "-gen-python-op-bindings",
+                "-bind-dialect=omp",
+            ],
+            "mlir/dialects/_omp_ops_gen.py",
+        ),
+    ],
+    tblgen = "//mlir:mlir-tblgen",
+    td_file = "mlir/dialects/OpenMPOps.td",
+    deps = [
+        "//mlir:OpBaseTdFiles",
+        "//mlir:OpenMPOpsTdFiles",
+    ],
+)
+
+filegroup(
+    name = "OpenMPOpsPyFiles",
+    srcs = [
+        "mlir/dialects/openmp.py",
+        ":OpenMPOpsPyGen",
     ],
 )
 
@@ -1097,7 +1130,7 @@ gentbl_filegroup(
                 "-gen-python-enum-bindings",
                 "-bind-dialect=transform",
             ],
-            "mlir/dialects/_structure_transform_enum_gen.py",
+            "mlir/dialects/_structured_transform_enum_gen.py",
         ),
     ],
     tblgen = "//mlir:mlir-tblgen",

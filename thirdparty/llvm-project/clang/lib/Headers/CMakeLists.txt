@@ -10,10 +10,24 @@ set(core_files
   module.modulemap
   stdalign.h
   stdarg.h
+  __stdarg___gnuc_va_list.h
+  __stdarg___va_copy.h
+  __stdarg_va_arg.h
+  __stdarg_va_copy.h
+  __stdarg_va_list.h
   stdatomic.h
   stdbool.h
   stddef.h
   __stddef_max_align_t.h
+  __stddef_null.h
+  __stddef_nullptr_t.h
+  __stddef_offsetof.h
+  __stddef_ptrdiff_t.h
+  __stddef_rsize_t.h
+  __stddef_size_t.h
+  __stddef_unreachable.h
+  __stddef_wchar_t.h
+  __stddef_wint_t.h
   stdint.h
   stdnoreturn.h
   tgmath.h
@@ -275,6 +289,8 @@ set(cuda_wrapper_files
 
 set(cuda_wrapper_bits_files
   cuda_wrappers/bits/shared_ptr_base.h
+  cuda_wrappers/bits/basic_string.h
+  cuda_wrappers/bits/basic_string.tcc
 )
 
 set(ppc_wrapper_files
@@ -304,11 +320,13 @@ set(openmp_wrapper_files
 )
 
 set(llvm_libc_wrapper_files
+  llvm_libc_wrappers/assert.h
   llvm_libc_wrappers/stdio.h
   llvm_libc_wrappers/stdlib.h
   llvm_libc_wrappers/string.h
   llvm_libc_wrappers/ctype.h
   llvm_libc_wrappers/inttypes.h
+  llvm_libc_wrappers/time.h
 )
 
 include(GetClangResourceDir)
@@ -459,7 +477,7 @@ add_header_target("loongarch-resource-headers" "${loongarch_files}")
 add_header_target("mips-resource-headers" "${mips_msa_files}")
 add_header_target("ppc-resource-headers" "${ppc_files};${ppc_wrapper_files}")
 add_header_target("ppc-htm-resource-headers" "${ppc_htm_files}")
-add_header_target("riscv-resource-headers" "${riscv_files};${riscv_generated_files}")
+add_header_target("riscv-resource-headers" "${riscv_files};${riscv_generated_files};${sifive_files}")
 add_header_target("systemz-resource-headers" "${systemz_files}")
 add_header_target("ve-resource-headers" "${ve_files}")
 add_header_target("webassembly-resource-headers" "${webassembly_files}")
@@ -603,6 +621,11 @@ install(
   FILES ${riscv_files}
   DESTINATION ${header_install_dir}
   EXCLUDE_FROM_ALL
+  COMPONENT riscv-resource-headers)
+
+install(
+  FILES ${sifive_files}
+  DESTINATION ${header_install_dir}
   COMPONENT riscv-resource-headers)
 
 install(

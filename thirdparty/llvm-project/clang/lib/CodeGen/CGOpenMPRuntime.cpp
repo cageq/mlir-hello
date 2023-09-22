@@ -480,27 +480,6 @@ enum OpenMPLocationFlags : unsigned {
   LLVM_MARK_AS_BITMASK_ENUM(/*LargestValue=*/OMP_IDENT_WORK_DISTRIBUTE)
 };
 
-namespace {
-LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
-/// Values for bit flags for marking which requires clauses have been used.
-enum OpenMPOffloadingRequiresDirFlags : int64_t {
-  /// flag undefined.
-  OMP_REQ_UNDEFINED               = 0x000,
-  /// no requires clause present.
-  OMP_REQ_NONE                    = 0x001,
-  /// reverse_offload clause.
-  OMP_REQ_REVERSE_OFFLOAD         = 0x002,
-  /// unified_address clause.
-  OMP_REQ_UNIFIED_ADDRESS         = 0x004,
-  /// unified_shared_memory clause.
-  OMP_REQ_UNIFIED_SHARED_MEMORY   = 0x008,
-  /// dynamic_allocators clause.
-  OMP_REQ_DYNAMIC_ALLOCATORS      = 0x010,
-  LLVM_MARK_AS_BITMASK_ENUM(/*LargestValue=*/OMP_REQ_DYNAMIC_ALLOCATORS)
-};
-
-} // anonymous namespace
-
 /// Describes ident structure that describes a source location.
 /// All descriptions are taken from
 /// https://github.com/llvm/llvm-project/blob/main/openmp/runtime/src/kmp.h
@@ -1055,12 +1034,15 @@ static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
 CGOpenMPRuntime::CGOpenMPRuntime(CodeGenModule &CGM)
     : CGM(CGM), OMPBuilder(CGM.getModule()) {
   KmpCriticalNameTy = llvm::ArrayType::get(CGM.Int32Ty, /*NumElements*/ 8);
-  llvm::OpenMPIRBuilderConfig Config(CGM.getLangOpts().OpenMPIsTargetDevice,
-                                     isGPU(), hasRequiresUnifiedSharedMemory(),
-                                     CGM.getLangOpts().OpenMPOffloadMandatory);
-  OMPBuilder.initialize(CGM.getLangOpts().OpenMPIsTargetDevice
-                            ? CGM.getLangOpts().OMPHostIRFile
-                            : StringRef{});
+  llvm::OpenMPIRBuilderConfig Config(
+      CGM.getLangOpts().OpenMPIsTargetDevice, isGPU(),
+      CGM.getLangOpts().OpenMPOffloadMandatory,
+      /*HasRequiresReverseOffload*/ false, /*HasRequiresUnifiedAddress*/ false,
+      hasRequiresUnifiedSharedMemory(), /*HasRequiresDynamicAllocators*/ false);
+  OMPBuilder.initialize();
+  OMPBuilder.loadOffloadInfoMetadata(CGM.getLangOpts().OpenMPIsTargetDevice
+                                         ? CGM.getLangOpts().OMPHostIRFile
+                                         : StringRef{});
   OMPBuilder.setConfig(Config);
 }
 
@@ -1557,7 +1539,7 @@ static llvm::TargetRegionEntryInfo getEntryInfoFromPresumedLoc(
     PresumedLoc PLoc = SM.getPresumedLoc(BeginLoc);
 
     llvm::sys::fs::UniqueID ID;
-    if (auto EC = llvm::sys::fs::getUniqueID(PLoc.getFilename(), ID)) {
+    if (llvm::sys::fs::getUniqueID(PLoc.getFilename(), ID)) {
       PLoc = SM.getPresumedLoc(BeginLoc, /*UseLineDirectives=*/false);
     }
 
@@ -1893,6 +1875,41 @@ bool CGOpenMPRuntime::emitDeclareTargetVarDefinition(const VarDecl *VD,
         llvm::OffloadEntriesInfoManager::OMPTargetRegionEntryDtor);
   }
   return CGM.getLangOpts().OpenMPIsTargetDevice;
+}
+
+void CGOpenMPRuntime::emitDeclareTargetFunction(const FunctionDecl *FD,
+                                                llvm::GlobalValue *GV) {
+  std::optional<OMPDeclareTargetDeclAttr *> ActiveAttr =
+      OMPDeclareTargetDeclAttr::getActiveAttr(FD);
+
+  // We only need to handle active 'indirect' declare target functions.
+  if (!ActiveAttr || !(*ActiveAttr)->getIndirect())
+    return;
+
+  // Get a mangled name to store the new device global in.
+  llvm::TargetRegionEntryInfo EntryInfo = getEntryInfoFromPresumedLoc(
+      CGM, OMPBuilder, FD->getCanonicalDecl()->getBeginLoc(), FD->getName());
+  SmallString<128> Name;
+  OMPBuilder.OffloadInfoManager.getTargetRegionEntryFnName(Name, EntryInfo);
+
+  // We need to generate a new global to hold the address of the indirectly
+  // called device function. Doing this allows us to keep the visibility and
+  // linkage of the associated function unchanged while allowing the runtime to
+  // access its value.
+  llvm::GlobalValue *Addr = GV;
+  if (CGM.getLangOpts().OpenMPIsTargetDevice) {
+    Addr = new llvm::GlobalVariable(
+        CGM.getModule(), CGM.VoidPtrTy,
+        /*isConstant=*/true, llvm::GlobalValue::ExternalLinkage, GV, Name,
+        nullptr, llvm::GlobalValue::NotThreadLocal,
+        CGM.getModule().getDataLayout().getDefaultGlobalsAddressSpace());
+    Addr->setVisibility(llvm::GlobalValue::ProtectedVisibility);
+  }
+
+  OMPBuilder.OffloadInfoManager.registerDeviceGlobalVarEntryInfo(
+      Name, Addr, CGM.GetTargetTypeStoreSize(CGM.VoidPtrTy).getQuantity(),
+      llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryIndirect,
+      llvm::GlobalValue::WeakODRLinkage);
 }
 
 Address CGOpenMPRuntime::getAddrOfArtificialThreadPrivate(CodeGenFunction &CGF,
@@ -6350,7 +6367,6 @@ static void getNumThreads(CodeGenFunction &CGF, const CapturedStmt *CS,
   }
   if (isOpenMPSimdDirective(Dir->getDirectiveKind()))
     UpperBound = 1;
-  return;
 }
 
 const Expr *CGOpenMPRuntime::getNumThreadsExprForTargetDirective(
@@ -8244,7 +8260,7 @@ public:
       // of tofrom.
       // Emit this[:1]
       CombinedInfo.Pointers.push_back(PartialStruct.Base.getPointer());
-      QualType Ty = MD->getThisType()->getPointeeType();
+      QualType Ty = MD->getThisObjectType();
       llvm::Value *Size =
           CGF.Builder.CreateIntCast(CGF.getTypeSize(Ty), CGF.Int64Ty,
                                     /*isSigned=*/true);
@@ -9646,9 +9662,13 @@ void CGOpenMPRuntime::emitTargetCall(
 
   assert((OffloadingMandatory || OutlinedFn) && "Invalid outlined function!");
 
-  const bool RequiresOuterTask = D.hasClausesOfKind<OMPDependClause>() ||
-                                 D.hasClausesOfKind<OMPNowaitClause>() ||
-                                 D.hasClausesOfKind<OMPInReductionClause>();
+  const bool RequiresOuterTask =
+      D.hasClausesOfKind<OMPDependClause>() ||
+      D.hasClausesOfKind<OMPNowaitClause>() ||
+      D.hasClausesOfKind<OMPInReductionClause>() ||
+      (CGM.getLangOpts().OpenMP >= 51 &&
+       needsTaskBasedThreadLimit(D.getDirectiveKind()) &&
+       D.hasClausesOfKind<OMPThreadLimitClause>());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
   const CapturedStmt &CS = *D.getCapturedStmt(OMPD_target);
   auto &&ArgsCodegen = [&CS, &CapturedVars](CodeGenFunction &CGF,
@@ -9976,8 +9996,6 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
 
   for (auto *ref : GeneratedRefs)
     CGM.addCompilerUsedGlobal(ref);
-
-  return;
 }
 
 bool CGOpenMPRuntime::emitTargetGlobal(GlobalDecl GD) {
@@ -10126,7 +10144,6 @@ llvm::Function *CGOpenMPRuntime::emitRequiresDirectiveRegFun() {
     std::string ReqName = getName({"omp_offloading", "requires_reg"});
     RequiresRegFn = CGM.CreateGlobalInitOrCleanUpFunction(FTy, ReqName, FI);
     CGF.StartFunction(GlobalDecl(), C.VoidTy, RequiresRegFn, FI, {});
-    OpenMPOffloadingRequiresDirFlags Flags = OMP_REQ_NONE;
     // TODO: check for other requires clauses.
     // The requires directive takes effect only when a target region is
     // present in the compilation unit. Otherwise it is ignored and not
@@ -10136,11 +10153,10 @@ llvm::Function *CGOpenMPRuntime::emitRequiresDirectiveRegFun() {
     assert((HasEmittedTargetRegion || HasEmittedDeclareTargetRegion ||
             !OMPBuilder.OffloadInfoManager.empty()) &&
            "Target or declare target region expected.");
-    if (HasRequiresUnifiedSharedMemory)
-      Flags = OMP_REQ_UNIFIED_SHARED_MEMORY;
     CGF.EmitRuntimeCall(OMPBuilder.getOrCreateRuntimeFunction(
                             CGM.getModule(), OMPRTL___tgt_register_requires),
-                        llvm::ConstantInt::get(CGM.Int64Ty, Flags));
+                        llvm::ConstantInt::get(
+                            CGM.Int64Ty, OMPBuilder.Config.getRequiresFlags()));
     CGF.FinishFunction();
   }
   return RequiresRegFn;
@@ -10198,6 +10214,24 @@ void CGOpenMPRuntime::emitNumTeamsClause(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(OMPBuilder.getOrCreateRuntimeFunction(
                           CGM.getModule(), OMPRTL___kmpc_push_num_teams),
                       PushNumTeamsArgs);
+}
+
+void CGOpenMPRuntime::emitThreadLimitClause(CodeGenFunction &CGF,
+                                            const Expr *ThreadLimit,
+                                            SourceLocation Loc) {
+  llvm::Value *RTLoc = emitUpdateLocation(CGF, Loc);
+  llvm::Value *ThreadLimitVal =
+      ThreadLimit
+          ? CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(ThreadLimit),
+                                      CGF.CGM.Int32Ty, /* isSigned = */ true)
+          : CGF.Builder.getInt32(0);
+
+  // Build call __kmpc_set_thread_limit(&loc, global_tid, thread_limit)
+  llvm::Value *ThreadLimitArgs[] = {RTLoc, getThreadID(CGF, Loc),
+                                    ThreadLimitVal};
+  CGF.EmitRuntimeCall(OMPBuilder.getOrCreateRuntimeFunction(
+                          CGM.getModule(), OMPRTL___kmpc_set_thread_limit),
+                      ThreadLimitArgs);
 }
 
 void CGOpenMPRuntime::emitTargetDataCalls(
